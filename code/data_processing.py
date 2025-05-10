@@ -1,91 +1,65 @@
-# app.py
+# data.py
+from dotenv import load_dotenv
 import os
-import streamlit as st
 import pandas as pd
-import plotly.express as px
+from spotipy import Spotify
+from spotipy.oauth2 import SpotifyClientCredentials
 
-# 1. Ensure cache folder exists
-CACHE_DIR = "./cache"
-os.makedirs(CACHE_DIR, exist_ok=True)
+# ─── Authentication Setup ────────────────────────────────────────────────
+# Load variables from .env into os.environ
+load_dotenv()  
 
-# 2. Paths
-SUMMARY_CSV = os.path.join(CACHE_DIR, "label_share_summary.csv")
-DETAIL_CSV  = os.path.join(CACHE_DIR, "label_share_detail.csv")
+CLIENT_ID     = os.getenv("SPOTIPY_CLIENT_ID")
+CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
 
-# 3. Sidebar controls
-st.sidebar.header("⚙️ Controls")
-refresh      = st.sidebar.button("🔄 Refresh data from Spotify")
-label_filter = st.sidebar.radio(
-    "🎚️ Label type",
-    ("All", "Majors", "Indies"),
-    index=0,
+if not CLIENT_ID or not CLIENT_SECRET:
+    raise ValueError(
+        "Spotify credentials missing: set SPOTIPY_CLIENT_ID and SPOTIPY_CLIENT_SECRET in your .env"
+    )
+
+auth_manager = SpotifyClientCredentials(
+    client_id=CLIENT_ID,
+    client_secret=CLIENT_SECRET
 )
 
-# 4. Title
-st.title("🎛️ Spotify Label Share Monitor")
+# ─── Data Fetch & Transform ─────────────────────────────────────────────
+def fetch_and_transform(summary_csv_path: str):
+    sp = Spotify(client_credentials_manager=auth_manager)
 
-@st.cache_data(show_spinner=True)
-def load_data(do_refresh: bool):
-    # if cached CSVs exist & no refresh, just load them
-    if not do_refresh and os.path.exists(SUMMARY_CSV):
-        df_sum    = pd.read_csv(SUMMARY_CSV)
-        df_detail = pd.read_csv(DETAIL_CSV)
-        return df_sum, df_detail
+    # 1. Fetch 50 newest releases (US)
+    new_releases = sp.new_releases(limit=50, country="US")["albums"]["items"]
+    album_ids = [alb["id"] for alb in new_releases]
 
-    # otherwise re-fetch from Spotify
-    from data import fetch_and_transform
-    df_sum, df_detail = fetch_and_transform(summary_csv_path=SUMMARY_CSV)
-    return df_sum, df_detail
+    # 2. Batch-fetch album details (label, popularity, release_date)
+    details = []
+    for i in range(0, len(album_ids), 20):
+        batch = album_ids[i : i + 20]
+        albums = sp.albums(batch)["albums"]
+        for alb in albums:
+            details.append({
+                "album_id":     alb["id"],
+                "album_name":   alb["name"],
+                "label":        alb.get("label", "Unknown"),
+                "popularity":   alb.get("popularity", 0),
+                "release_date": alb.get("release_date"),
+            })
 
-# 5. Load
-df_summary, df_detail = load_data(refresh)
+    df_detail = pd.DataFrame(details)
 
-# 6. Define major labels set
-MAJOR_LABELS = {
-    "Universal Music Group",
-    "Sony Music Entertainment",
-    "Warner Music Group",
-}
-# 7. Filter
-if label_filter == "Majors":
-    df_plot = df_summary[df_summary["label"].isin(MAJOR_LABELS)]
-elif label_filter == "Indies":
-    df_plot = df_summary[~df_summary["label"].isin(MAJOR_LABELS)]
-else:
-    df_plot = df_summary.copy()
+    # 3. Summarize by label
+    df_summary = (
+        df_detail
+        .groupby("label", as_index=False)
+        .agg(
+            album_count    = ("album_id",   "count"),
+            avg_popularity = ("popularity", "mean")
+        )
+        .sort_values("album_count", ascending=False)
+    )
 
-# 8. Treemap
-st.markdown("### 📊 Label Share Treemap")
-fig = px.treemap(
-    df_plot,
-    path=["label"],
-    values="album_count",
-    title="Number of New Releases by Label",
-)
-st.plotly_chart(fig, use_container_width=True)
+    # 4. Write CSVs to cache
+    df_summary.to_csv(summary_csv_path, index=False)
+    detail_csv = summary_csv_path.replace("summary", "detail")
+    df_detail.to_csv(detail_csv, index=False)
 
-# 9. Bar chart of average popularity
-st.markdown("### 🎵 Average Popularity by Label")
-fig2 = px.bar(
-    df_plot.sort_values("avg_popularity", ascending=False),
-    x="avg_popularity",
-    y="label",
-    orientation="h",
-    title="Avg. Popularity of New Releases",
-)
-st.plotly_chart(fig2, use_container_width=True)
-
-# 10. Download buttons
-st.markdown("---")
-st.download_button(
-    label="📥 Download summary CSV",
-    data=open(SUMMARY_CSV, "rb"),
-    file_name="label_share_summary.csv",
-    mime="text/csv",
-)
-st.download_button(
-    label="📥 Download detail CSV",
-    data=open(DETAIL_CSV, "rb"),
-    file_name="label_share_detail.csv",
-    mime="text/csv",
-)
+    return df_summary, df_detail
