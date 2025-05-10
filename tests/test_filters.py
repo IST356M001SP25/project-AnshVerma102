@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 # pull in your keyword list
-from app.py import MAJOR_KEYWORDS
+from code.app import MAJOR_KEYWORDS
 
 def test_label_keyword_filtering():
     # make a small summary-like DataFrame

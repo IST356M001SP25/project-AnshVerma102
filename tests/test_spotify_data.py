@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 # import the function under test
-from spotify_data import fetch_and_transform
+from code.spotify_data import fetch_and_transform
 
 # A dummy Spotify client to avoid real API calls
 class DummySpotify:
