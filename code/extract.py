@@ -1,34 +1,43 @@
-import streamlit as st
-import spotipy as sp
+# data.py
 import pandas as pd
-@st.cache_data(ttl=3600)
-def fetch_and_cache_new_releases():
-    # Fetch the first page of new releases (0–49)
-    new_rel = sp.new_releases(limit=50)["albums"]["items"]
-    album_ids = [alb["id"] for alb in new_rel]
+from spotipy import Spotify
+from spotipy.oauth2 import SpotifyClientCredentials
 
-    # Batch‐fetch full album details (to get the `label` & `popularity`)
-    details = sp.albums(album_ids)["albums"]
+CLIENT_CREDS = SpotifyClientCredentials()
 
-    # Build a flat record per album
-    records = []
-    for alb in details:
-        records.append({
-            "album_id":      alb["id"],
-            "album_name":    alb["name"],
-            "label":         alb.get("label", "Unknown"),
-            "release_date":  alb["release_date"],
-            "popularity":    alb["popularity"],
-            "total_tracks":  alb["total_tracks"],
-        })
+def fetch_and_transform(summary_csv_path: str):
+    sp = Spotify(client_credentials_manager=CLIENT_CREDS)
 
-    df = pd.DataFrame(records)
-    # Save to CSV for reproducibility & offline mode
-    df.to_csv(CACHE_FILE, index=False)
-    return df
+    # fetch 50 new releases
+    new = sp.new_releases(limit=50, country="US")["albums"]["items"]
+    ids = [a["id"] for a in new]
 
-# On app startup:
-df_albums = fetch_and_cache_new_releases()
-st.write("Fetched and cached:", len(df_albums), "albums")
-sp = spotipy.Spotify(auth_manager=auth_manager)
+    details = []
+    for i in range(0, len(ids), 20):
+        batch = ids[i : i + 20]
+        for alb in sp.albums(batch)["albums"]:
+            details.append({
+                "album_id":     alb["id"],
+                "album_name":   alb["name"],
+                "label":        alb.get("label", "Unknown"),
+                "popularity":   alb.get("popularity", 0),
+                "release_date": alb.get("release_date"),
+            })
+
+    df_detail = pd.DataFrame(details)
+    df_summary = (
+        df_detail
+        .groupby("label", as_index=False)
+        .agg(
+            album_count    = ("album_id", "count"),
+            avg_popularity = ("popularity", "mean")
+        )
+        .sort_values("album_count", ascending=False)
+    )
+
+    # save both
+    df_summary.to_csv(summary_csv_path, index=False)
+    df_detail.to_csv(summary_csv_path.replace("summary", "detail"), index=False)
+
+    return df_summary, df_detail
 
