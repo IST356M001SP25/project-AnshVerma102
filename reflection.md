@@ -22,4 +22,4 @@ Examples:
 **Best Reflection** "I learned when to use while vs for loops. While loops are for sentiel-controlled values (waiting for a condition to occur), vs for loops are for iterating over collections of fixed values."
 
 `--- Reflection Below This Line ---`
-
+This project gave me a hands on experience building a data pipeline using an unfamiliar API and how I should intergrate it with other important python functions such as plotly. I struggles with actually obtaining the data, as my credentials refused to work, so I had to jump through many hoops to get them to function. I ended up having to do an unorthodox solution. 
